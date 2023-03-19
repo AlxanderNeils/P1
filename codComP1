@@ -1,0 +1,180 @@
+# Script completo.
+
+import IPython
+IPython.display.HTML('<h2>1-Minute Presentation</h2><iframe width="720" height="405" src="https://www.youtube.com/embed/-1XYTmm8HhE" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe><br><h2>5-Minute Presentation</h2><iframe width="720" height="405" src="https://www.youtube.com/embed/uEDqCxvF5yc" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>')
+
+import IPython
+IPython.display.HTML('<iframe width="720" height="405" src="https://www.youtube.com/embed/LWDGR5v3-3o" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>')
+
+
+# Clonar repositorio
+!git clone https://github.com/facebookresearch/pifuhd
+
+# Abrir archivo de datos
+cd/content/pifuhd/sample_images
+
+
+# Intentamos instalar el paquete de pytorch3 pero no termina de instalarse 
+!pip install git+https://github.com/facebookresearch/pytorch3d.git
+
+# Una vez instalado deberiamos poder llamar a la libreria
+import pytorch3d
+print(pytorch3d.__version__) # con esto confirmamos su instalación
+
+# ATENCION
+# CAMINO 1. Crgando el archivo desde la pc
+# La version en Collab para importar el archivo que debeestar subido en collab en la carpeta Samples
+# y luego con la variable "filenames" buscaremos y cargaremos la imagen desde nuestra computadora
+
+from google.colab import files
+
+filename = list(files.upload().keys())[0]
+
+# CAMINO 2. Cargando el archivo primero a collab y analizar desde aqui
+import os
+
+try:
+  image_path = '/content/pifuhd/sample_images/%s' % filename
+except:
+  image_path = '/content/pifuhd/sample_images/H7P.png' # Aqui debemos cambiar el nombre de la imagen que usaremos o que cargamos
+image_dir = os.path.dirname(image_path)
+file_name = os.path.splitext(os.path.basename(image_path))[0]
+
+# output pathes
+obj_path = '/content/pifuhd/results/pifuhd_final/recon/result_%s_256.obj' % file_name
+out_img_path = '/content/pifuhd/results/pifuhd_final/recon/result_%s_256.png' % file_name
+video_path = '/content/pifuhd/results/pifuhd_final/recon/result_%s_256.mp4' % file_name
+video_display_path = '/content/pifuhd/results/pifuhd_final/result_%s_256_display.mp4' % file_name
+
+# luego sigue esta celda
+cd /content
+
+# luego esta celda
+!git clone https://github.com/Daniil-Osokin/lightweight-human-pose-estimation.pytorch.git
+
+# luego esta celda
+cd /content/lightweight-human-pose-estimation.pytorch/
+
+# Luego esta celda
+!wget https://download.01.org/opencv/openvino_training_extensions/models/human_pose_estimation/checkpoint_iter_370000.pth
+
+# Luego esta celda
+import torch
+import cv2
+import numpy as np
+from models.with_mobilenet import PoseEstimationWithMobileNet
+from modules.keypoints import extract_keypoints, group_keypoints
+from modules.load_state import load_state
+from modules.pose import Pose, track_poses
+import demo
+
+def get_rect(net, images, height_size):
+    net = net.eval()
+
+    stride = 8
+    upsample_ratio = 4
+    num_keypoints = Pose.num_kpts
+    previous_poses = []
+    delay = 33
+    for image in images:
+        rect_path = image.replace('.%s' % (image.split('.')[-1]), '_rect.txt')
+        img = cv2.imread(image, cv2.IMREAD_COLOR)
+        orig_img = img.copy()
+        orig_img = img.copy()
+        heatmaps, pafs, scale, pad = demo.infer_fast(net, img, height_size, stride, upsample_ratio, cpu=False)
+
+        total_keypoints_num = 0
+        all_keypoints_by_type = []
+        for kpt_idx in range(num_keypoints):  # 19th for bg
+            total_keypoints_num += extract_keypoints(heatmaps[:, :, kpt_idx], all_keypoints_by_type, total_keypoints_num)
+
+        pose_entries, all_keypoints = group_keypoints(all_keypoints_by_type, pafs)
+        for kpt_id in range(all_keypoints.shape[0]):
+            all_keypoints[kpt_id, 0] = (all_keypoints[kpt_id, 0] * stride / upsample_ratio - pad[1]) / scale
+            all_keypoints[kpt_id, 1] = (all_keypoints[kpt_id, 1] * stride / upsample_ratio - pad[0]) / scale
+        current_poses = []
+
+        rects = []
+        for n in range(len(pose_entries)):
+            if len(pose_entries[n]) == 0:
+                continue
+            pose_keypoints = np.ones((num_keypoints, 2), dtype=np.int32) * -1
+            valid_keypoints = []
+            for kpt_id in range(num_keypoints):
+                if pose_entries[n][kpt_id] != -1.0:  # keypoint was found
+                    pose_keypoints[kpt_id, 0] = int(all_keypoints[int(pose_entries[n][kpt_id]), 0])
+                    pose_keypoints[kpt_id, 1] = int(all_keypoints[int(pose_entries[n][kpt_id]), 1])
+                    valid_keypoints.append([pose_keypoints[kpt_id, 0], pose_keypoints[kpt_id, 1]])
+            valid_keypoints = np.array(valid_keypoints)
+            
+            if pose_entries[n][10] != -1.0 or pose_entries[n][13] != -1.0:
+              pmin = valid_keypoints.min(0)
+              pmax = valid_keypoints.max(0)
+
+              center = (0.5 * (pmax[:2] + pmin[:2])).astype(np.int)
+              radius = int(0.65 * max(pmax[0]-pmin[0], pmax[1]-pmin[1]))
+            elif pose_entries[n][10] == -1.0 and pose_entries[n][13] == -1.0 and pose_entries[n][8] != -1.0 and pose_entries[n][11] != -1.0:
+              # if leg is missing, use pelvis to get cropping
+              center = (0.5 * (pose_keypoints[8] + pose_keypoints[11])).astype(np.int)
+              radius = int(1.45*np.sqrt(((center[None,:] - valid_keypoints)**2).sum(1)).max(0))
+              center[1] += int(0.05*radius)
+            else:
+              center = np.array([img.shape[1]//2,img.shape[0]//2])
+              radius = max(img.shape[1]//2,img.shape[0]//2)
+
+            x1 = center[0] - radius
+            y1 = center[1] - radius
+
+            rects.append([x1, y1, 2*radius, 2*radius])
+
+        np.savetxt(rect_path, np.array(rects), fmt='%d')
+        
+# Luego esta
+net = PoseEstimationWithMobileNet()
+checkpoint = torch.load('checkpoint_iter_370000.pth', map_location='cpu')
+load_state(net, checkpoint)
+
+get_rect(net.cuda(), [image_path], 512)
+
+# luego esta celda
+cd /content/pifuhd/
+
+# luego esta celda
+!sh ./scripts/download_trained_model.sh
+
+# Luego esta celda
+# Warning: all images with the corresponding rectangle files under -i will be processed. 
+!python -m apps.simple_test -r 256 --use_rect -i $image_dir
+
+# seems that 256 is the maximum resolution that can fit into Google Colab. 
+# If you want to reconstruct a higher-resolution mesh, please try with your own machine. 
+
+# Luego esta celda  ************ Aqui se genera el error
+!pip install pytorch3d
+
+# If you get an error in the next cell, you can instead try the following command (don't forget to comment out the one above!).
+# Note that this error is caused by inconsistent cuda version for the pytorch3d package and pytorch in Colab environment.
+# Thus, this issue may persist unless pytorch3d in the pip package is updated with the cuda version consistent with pytorch in Colab.
+# Also please be aware that the following command is much slower as it builds pytorch3d from scratch.
+
+# !pip install 'git+https://github.com/facebookresearch/pytorch3d.git@stable'
+
+# You can try another solution below as well. This is also slow and requires you to restart the runtime.
+
+# !pip install 'torch==1.6.0+cu101' -f https://download.pytorch.org/whl/torch_stable.html
+# !pip install 'torchvision==0.7.0+cu101' -f https://download.pytorch.org/whl/torch_stable.html
+# !pip install 'pytorch3d==0.2.5'
+
+# luego esta celda
+!!pip install git+https://github.com/facebookresearch/pytorch3d.git
+
+# Luego esta celda 
+from lib.colab_util import generate_video_from_obj, set_renderer, video
+
+renderer = set_renderer()
+generate_video_from_obj(obj_path, out_img_path, video_path, renderer)
+
+# we cannot play a mp4 video generated by cv2
+!ffmpeg -i $video_path -vcodec libx264 $video_display_path -y -loglevel quiet
+video(video_display_path) 
+
