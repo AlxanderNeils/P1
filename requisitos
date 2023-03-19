@@ -1,0 +1,10 @@
+# Requisistos
+# Requirements
+# Python 3
+# PyTorch tested on 1.4.0
+# json
+# PIL
+# skimage
+# tqdm
+# numpy
+# cv2
