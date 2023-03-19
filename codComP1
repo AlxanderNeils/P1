@@ -17,6 +17,10 @@ cd/content/pifuhd/sample_images
 # Intentamos instalar el paquete de pytorch3 pero no termina de instalarse 
 !pip install git+https://github.com/facebookresearch/pytorch3d.git
 
+# Supuestamente debemos hacerlo de esta manera
+!pip install -q torch==1.9.0 torchvision==0.10.0 torchaudio==0.9.0
+!pip install -q pytorch3d==0.4.0
+
 # Una vez instalado deberiamos poder llamar a la libreria
 import pytorch3d
 print(pytorch3d.__version__) # con esto confirmamos su instalación
